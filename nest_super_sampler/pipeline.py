@@ -9,6 +9,7 @@ from .interfaces import (
     IFrameProcessor,
     IFrameSampler,
     IImageSink,
+    IPostProcessor,
     ISuperSampler,
     IVideoReader,
 )
@@ -25,6 +26,7 @@ class SuperSamplingPipeline:
         sink: IImageSink,
         max_frames: Optional[int] = None,
         preprocessor: Optional[IFrameProcessor] = None,
+        postprocessor: Optional[IPostProcessor] = None,
     ) -> None:
         self._reader = reader
         self._sampler = sampler
@@ -32,6 +34,7 @@ class SuperSamplingPipeline:
         self._sink = sink
         self._max_frames = max_frames
         self._pre = preprocessor
+        self._post = postprocessor
 
     def run(self) -> Dict[str, float]:
         info = self._reader.info()
@@ -45,6 +48,8 @@ class SuperSamplingPipeline:
             if self._sampler.should_keep(idx, ts, frame):
                 work = self._pre.process(frame) if self._pre is not None else frame
                 upscaled = self._super.upscale(work)
+                if self._post is not None:
+                    upscaled = self._post.process(upscaled)
                 self._sink.write(idx, ts, frame, upscaled, {"fps": info.get("fps", 0.0)})
                 kept += 1
         self._sink.close()
