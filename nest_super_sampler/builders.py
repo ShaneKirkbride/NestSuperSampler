@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .config import PipelineConfig
 from .pipeline import SuperSamplingPipeline
+from .postprocessors import build_postprocessor
 from .preprocessors import build_preprocessor
 from .samplers import CompositeSampler, NthFrameSampler, SceneChangeSampler
 from .sinks import DiskImageSink
@@ -50,6 +51,7 @@ def build_pipeline(cfg: PipelineConfig) -> SuperSamplingPipeline:
         deblur_alpha=cfg.deblur_alpha,
         deblur_sigma=cfg.deblur_sigma,
     )
+    postprocessor = build_postprocessor(cfg)
     return SuperSamplingPipeline(
         reader,
         sampler,
@@ -57,4 +59,5 @@ def build_pipeline(cfg: PipelineConfig) -> SuperSamplingPipeline:
         sink,
         cfg.max_frames,
         preprocessor=preprocessor,
+        postprocessor=postprocessor,
     )

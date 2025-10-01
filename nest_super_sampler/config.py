@@ -67,3 +67,9 @@ class PipelineConfig:
     # Deblur params
     deblur_alpha: float = 0.6
     deblur_sigma: float = 1.2
+
+    # Sharpen params
+    enable_sharpen: bool = False
+    sharpen_alpha: float = 0.35
+    sharpen_sigma: float = 1.0
+    sharpen_edge_clip: float = 0.015

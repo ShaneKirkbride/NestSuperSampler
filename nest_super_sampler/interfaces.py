@@ -53,3 +53,10 @@ class IFrameProcessor(Protocol):
 
     def process(self, frame_bgr: np.ndarray) -> np.ndarray:
         """Return a processed frame."""
+
+
+class IPostProcessor(Protocol):
+    """Transforms frames after super-resolution."""
+
+    def process(self, frame_bgr: np.ndarray) -> np.ndarray:
+        """Return a processed frame."""

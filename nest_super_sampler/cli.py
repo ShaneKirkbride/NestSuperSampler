@@ -45,6 +45,12 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--db-alpha", type=float, default=0.6)
     parser.add_argument("--db-sigma", type=float, default=1.2)
 
+    sharpen_group = parser.add_argument_group("Sharpening", "Post-processing sharpening options")
+    sharpen_group.add_argument("--sharpen", action="store_true")
+    sharpen_group.add_argument("--sh-alpha", type=float, default=0.35)
+    sharpen_group.add_argument("--sh-sigma", type=float, default=1.0)
+    sharpen_group.add_argument("--sh-edge", type=float, default=0.015)
+
     return parser.parse_args(argv)
 
 
@@ -80,6 +86,10 @@ def config_from_args(args: argparse.Namespace) -> PipelineConfig:
         denoise_search=args.dn_s,
         deblur_alpha=args.db_alpha,
         deblur_sigma=args.db_sigma,
+        enable_sharpen=args.sharpen,
+        sharpen_alpha=args.sh_alpha,
+        sharpen_sigma=args.sh_sigma,
+        sharpen_edge_clip=args.sh_edge,
     )
 
 
