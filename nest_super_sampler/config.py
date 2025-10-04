@@ -8,6 +8,14 @@ from pathlib import Path
 from typing import Optional
 
 
+class LightingCondition(str, Enum):
+    """Qualitative lighting conditions for the capture."""
+
+    AUTO = "auto"
+    DAYTIME = "day"
+    NIGHT = "night"
+
+
 class SuperResAlgo(str, Enum):
     """Supported super-resolution algorithms."""
 
@@ -32,6 +40,11 @@ class PipelineConfig:
     scene_hist_threshold: float = 0.30
     scene_min_gap_frames: int = 20
 
+    # Capture hints
+    capture_fps_hint: Optional[float] = None
+    lighting: LightingCondition = LightingCondition.AUTO
+    enable_motion_compensation: bool = False
+
     # Super-resolution
     upscale_factor: int = 2
     algo: SuperResAlgo = SuperResAlgo.EDSR
@@ -50,6 +63,9 @@ class PipelineConfig:
     enable_glare: bool = False
     enable_denoise: bool = False
     enable_deblur: bool = False
+    enable_daytime_detail_transfer: bool = False
+    daytime_reference_media: Optional[Path] = None
+    daytime_model_path: Optional[Path] = None
 
     # Glare params
     glare_v_thresh: float = 0.90
