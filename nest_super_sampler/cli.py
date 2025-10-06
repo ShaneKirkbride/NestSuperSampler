@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .builders import build_pipeline
-from .config import PipelineConfig, SuperResAlgo
+from .config import LightingCondition, PipelineConfig, SuperResAlgo
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -28,6 +28,41 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--orig-too", action="store_true")
     parser.add_argument("--max", type=int, default=None)
     parser.add_argument("--strict-dnn", action="store_true")
+    parser.add_argument(
+        "--lighting",
+        type=str,
+        default=LightingCondition.AUTO.value,
+        choices=[c.value for c in LightingCondition],
+        help="Lighting condition hint used to tune blur/glare mitigation.",
+    )
+    parser.add_argument(
+        "--fps-hint",
+        type=float,
+        default=None,
+        help="Override the video FPS metadata when estimating motion blur.",
+    )
+    parser.add_argument(
+        "--motion-comp",
+        action="store_true",
+        help="Enable adaptive motion blur compensation tuned by lighting and FPS hints.",
+    )
+    parser.add_argument(
+        "--daytime-transfer",
+        action="store_true",
+        help="Inject daytime edge detail statistics into night captures.",
+    )
+    parser.add_argument(
+        "--daytime-reference",
+        type=Path,
+        default=None,
+        help="Path to daytime reference media (video or image directory).",
+    )
+    parser.add_argument(
+        "--daytime-model",
+        type=Path,
+        default=None,
+        help="Path to a cached daytime detail model (.npz).",
+    )
 
     # Preprocessing flags
     parser.add_argument("--glare", action="store_true")
@@ -64,6 +99,12 @@ def config_from_args(args: argparse.Namespace) -> PipelineConfig:
         enable_scene_change_sampling=args.scene,
         scene_hist_threshold=args.scene_thresh,
         scene_min_gap_frames=args.scene_gap,
+        capture_fps_hint=args.fps_hint,
+        lighting=LightingCondition(args.lighting),
+        enable_motion_compensation=args.motion_comp,
+        enable_daytime_detail_transfer=args.daytime_transfer,
+        daytime_reference_media=args.daytime_reference,
+        daytime_model_path=args.daytime_model,
         upscale_factor=args.scale,
         algo=SuperResAlgo(args.algo),
         model_dir=args.models,
