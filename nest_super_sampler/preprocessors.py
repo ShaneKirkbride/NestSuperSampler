@@ -8,6 +8,9 @@ import cv2
 import numpy as np
 
 from .interfaces import IFrameProcessor
+from .capture_profiles import CaptureProfile
+from .config import LightingCondition
+from .detail_models import DaytimeDetailModel, analyze_frame
 
 
 class GlareReducer(IFrameProcessor):
@@ -81,6 +84,77 @@ class Deblurrer(IFrameProcessor):
         return cv2.addWeighted(frame_bgr, 1 + self.alpha, blur, -self.alpha, 0)
 
 
+class MotionAwareDeblurrer(IFrameProcessor):
+    """Adaptive motion deblurring tuned using capture metadata."""
+
+    def __init__(self, profile: CaptureProfile) -> None:
+        self._profile = profile
+
+    def process(self, frame_bgr: np.ndarray) -> np.ndarray:
+        blur_strength = self._profile.motion_blur_strength()
+        gaussian_sigma = 0.6 + 0.5 * blur_strength
+        alpha = 0.65 + 0.45 * blur_strength
+        softened = cv2.GaussianBlur(frame_bgr, (0, 0), gaussian_sigma)
+        high_boost = cv2.addWeighted(frame_bgr, 1 + alpha, softened, -alpha, 0)
+
+        ycrcb = cv2.cvtColor(high_boost, cv2.COLOR_BGR2YCrCb)
+        y, cr, cb = cv2.split(ycrcb)
+        laplacian = cv2.Laplacian(y, cv2.CV_32F, ksize=3)
+        gain = self._profile.detail_gain()
+        enhanced_luma = y.astype(np.float32) + gain * laplacian
+        enhanced_luma = np.clip(enhanced_luma, 0, 255).astype(np.uint8)
+        merged = cv2.merge([enhanced_luma, cr, cb])
+        restored = cv2.cvtColor(merged, cv2.COLOR_YCrCb2BGR)
+
+        if self._profile.lighting is LightingCondition.DAYTIME:
+            restored = cv2.bilateralFilter(restored, d=5, sigmaColor=30, sigmaSpace=12)
+
+        return restored
+
+
+class DayNightDetailTransfer(IFrameProcessor):
+    """Inject daytime detail characteristics into dim captures."""
+
+    def __init__(
+        self,
+        model: DaytimeDetailModel,
+        *,
+        residual_blend: float = 0.65,
+        max_detail_gain: float = 1.9,
+    ) -> None:
+        self._model = model
+        self._residual_blend = residual_blend
+        self._max_detail_gain = max_detail_gain
+
+    def process(self, frame_bgr: np.ndarray) -> np.ndarray:
+        gradient, laplacian = analyze_frame(frame_bgr)
+        alpha, sigma = self._model.estimate_parameters(gradient, laplacian)
+        softened = cv2.GaussianBlur(frame_bgr, (0, 0), sigma)
+        unsharp = cv2.addWeighted(frame_bgr, 1 + alpha, softened, -alpha, 0)
+
+        detail_gain = np.clip(
+            alpha / max(self._model.base_alpha, 1e-3), 0.55, self._max_detail_gain
+        )
+
+        residual_scale = self._residual_blend * detail_gain
+        if residual_scale <= 0:
+            return unsharp
+
+        ycrcb = cv2.cvtColor(unsharp, cv2.COLOR_BGR2YCrCb)
+        y, cr, cb = cv2.split(ycrcb)
+        lap = cv2.Laplacian(y, cv2.CV_32F, ksize=3)
+        enhanced_luma = y.astype(np.float32) + residual_scale * lap
+        enhanced_luma = np.clip(enhanced_luma, 0, 255).astype(np.uint8)
+        merged = cv2.merge([enhanced_luma, cr, cb])
+        result = cv2.cvtColor(merged, cv2.COLOR_YCrCb2BGR)
+
+        base_gradient, _ = analyze_frame(unsharp)
+        enhanced_gradient, _ = analyze_frame(result)
+        if enhanced_gradient < base_gradient:
+            return unsharp
+        return result
+
+
 class FrameProcessingPipeline(IFrameProcessor):
     """Compose several frame processors."""
 
@@ -98,6 +172,8 @@ def build_preprocessor(
     enable_glare: bool,
     enable_denoise: bool,
     enable_deblur: bool,
+    enable_motion_compensation: bool,
+    enable_daytime_detail_transfer: bool = False,
     *,
     glare_v_thresh: float,
     glare_s_thresh: float,
@@ -110,6 +186,8 @@ def build_preprocessor(
     denoise_search: int,
     deblur_alpha: float,
     deblur_sigma: float,
+    motion_profile: Optional[CaptureProfile] = None,
+    daytime_model: Optional[DaytimeDetailModel] = None,
 ) -> Optional[FrameProcessingPipeline]:
     """Create a processing pipeline based on configuration flags."""
 
@@ -135,4 +213,8 @@ def build_preprocessor(
         )
     if enable_deblur:
         processors.append(Deblurrer(deblur_alpha, deblur_sigma))
+    if enable_motion_compensation and motion_profile is not None:
+        processors.append(MotionAwareDeblurrer(motion_profile))
+    if enable_daytime_detail_transfer and daytime_model is not None:
+        processors.append(DayNightDetailTransfer(daytime_model))
     return FrameProcessingPipeline(processors) if processors else None
