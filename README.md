@@ -57,6 +57,19 @@ python -m nest_super_sampler path/to/daytime.mp4 \
   --fps-hint 30
 ```
 
+Pair sharp daytime references with the known Nest frame rate to deconvolve motion streaks
+and restore fine detail:
+
+```bash
+python -m nest_super_sampler path/to/daytime.mp4 \
+  --out ./export \
+  --motion-comp \
+  --lighting day \
+  --fps-hint 30 \
+  --daytime-transfer \
+  --daytime-reference ./reference_day_images
+```
+
 To transfer sharp daytime structure into a noisy night capture, feed either a cached model or
 raw daytime footage:
 
@@ -117,6 +130,7 @@ from nest_super_sampler import (
     fit_daytime_detail_model,
 )
 from nest_super_sampler.builders import build_pipeline
+from nest_super_sampler.capture_profiles import CaptureProfile
 from nest_super_sampler.detail_models import DaytimeDetailModel
 
 day_model: DaytimeDetailModel = fit_daytime_detail_model(
@@ -136,8 +150,21 @@ cfg = PipelineConfig(
 )
 profile = derive_capture_profile(cfg, {"fps": 15.0})
 print("Estimated blur strength:", profile.motion_blur_strength())
+print("Exposure estimate (ms):", profile.exposure_time_ms())
+print("Motion kernel length (px):", profile.motion_kernel_length())
 pipeline = build_pipeline(cfg)
 stats = pipeline.run()
+```
+
+You can also instantiate the enhanced motion deblurrer directly when building custom
+pipelines:
+
+```python
+from nest_super_sampler.preprocessors import MotionAwareDeblurrer
+
+profile = CaptureProfile(fps=30.0, lighting=LightingCondition.DAYTIME, has_daytime_reference=True)
+deblurrer = MotionAwareDeblurrer(profile, daytime_model=day_model)
+restored = deblurrer.process(cv2.imread("motion_blurred_frame.png"))
 ```
 
 ## CSV output

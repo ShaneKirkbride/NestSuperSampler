@@ -87,15 +87,49 @@ class Deblurrer(IFrameProcessor):
 class MotionAwareDeblurrer(IFrameProcessor):
     """Adaptive motion deblurring tuned using capture metadata."""
 
-    def __init__(self, profile: CaptureProfile) -> None:
+    def __init__(
+        self,
+        profile: CaptureProfile,
+        daytime_model: Optional[DaytimeDetailModel] = None,
+    ) -> None:
         self._profile = profile
+        self._daytime_model = daytime_model if profile.has_daytime_reference else None
+
+    @staticmethod
+    def _wiener_channel(
+        channel: np.ndarray, kernel: np.ndarray, balance: float
+    ) -> np.ndarray:
+        h, w = channel.shape
+        pad = np.zeros((h, w), dtype=np.float32)
+        kh, kw = kernel.shape
+        pad[:kh, :kw] = kernel
+        pad = np.roll(np.roll(pad, -kh // 2, axis=0), -kw // 2, axis=1)
+        kernel_fft = np.fft.fft2(pad)
+        channel_fft = np.fft.fft2(channel.astype(np.float32))
+        denom = np.abs(kernel_fft) ** 2 + balance
+        wiener = np.conj(kernel_fft) / np.maximum(denom, 1e-6)
+        restored = np.fft.ifft2(channel_fft * wiener)
+        return np.real(restored).astype(np.float32)
+
+    def _wiener_deblur(self, frame_bgr: np.ndarray) -> np.ndarray:
+        kernel = self._profile.motion_kernel()
+        kernel /= max(float(kernel.sum()), 1e-6)
+        balance = max(1e-4, self._profile.wiener_balance())
+        channels = cv2.split(frame_bgr.astype(np.float32))
+        restored_channels = [
+            self._wiener_channel(channel, kernel, balance) for channel in channels
+        ]
+        merged = cv2.merge(restored_channels)
+        return np.clip(merged, 0, 255).astype(np.uint8)
 
     def process(self, frame_bgr: np.ndarray) -> np.ndarray:
+        preconditioned = self._wiener_deblur(frame_bgr)
+
         blur_strength = self._profile.motion_blur_strength()
-        gaussian_sigma = 0.6 + 0.5 * blur_strength
-        alpha = 0.65 + 0.45 * blur_strength
-        softened = cv2.GaussianBlur(frame_bgr, (0, 0), gaussian_sigma)
-        high_boost = cv2.addWeighted(frame_bgr, 1 + alpha, softened, -alpha, 0)
+        gaussian_sigma = 0.45 + 0.45 * blur_strength
+        alpha = 0.55 + 0.5 * blur_strength
+        softened = cv2.GaussianBlur(preconditioned, (0, 0), gaussian_sigma)
+        high_boost = cv2.addWeighted(preconditioned, 1 + alpha, softened, -alpha, 0)
 
         ycrcb = cv2.cvtColor(high_boost, cv2.COLOR_BGR2YCrCb)
         y, cr, cb = cv2.split(ycrcb)
@@ -106,8 +140,14 @@ class MotionAwareDeblurrer(IFrameProcessor):
         merged = cv2.merge([enhanced_luma, cr, cb])
         restored = cv2.cvtColor(merged, cv2.COLOR_YCrCb2BGR)
 
+        if self._daytime_model is not None:
+            gradient, lap = analyze_frame(restored)
+            day_alpha, day_sigma = self._daytime_model.estimate_parameters(gradient, lap)
+            refined = cv2.GaussianBlur(restored, (0, 0), day_sigma)
+            restored = cv2.addWeighted(restored, 1 + day_alpha, refined, -day_alpha, 0)
+
         if self._profile.lighting is LightingCondition.DAYTIME:
-            restored = cv2.bilateralFilter(restored, d=5, sigmaColor=30, sigmaSpace=12)
+            restored = cv2.bilateralFilter(restored, d=5, sigmaColor=28, sigmaSpace=10)
 
         return restored
 
@@ -207,7 +247,7 @@ def build_preprocessor(
     if enable_deblur:
         processors.append(Deblurrer(deblur_alpha, deblur_sigma))
     if enable_motion_compensation and motion_profile is not None:
-        processors.append(MotionAwareDeblurrer(motion_profile))
+        processors.append(MotionAwareDeblurrer(motion_profile, daytime_model))
     if enable_daytime_detail_transfer and daytime_model is not None:
         processors.append(DayNightDetailTransfer(daytime_model))
     return FrameProcessingPipeline(processors) if processors else None
