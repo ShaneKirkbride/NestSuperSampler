@@ -116,6 +116,32 @@ def test_motion_aware_deblurrer_enhances_edges() -> None:
     assert restored.var() >= blurred.var()
 
 
+def test_capture_profile_kernel_reflects_fps() -> None:
+    fast = CaptureProfile(fps=30.0, lighting=LightingCondition.DAYTIME)
+    slow = CaptureProfile(fps=12.0, lighting=LightingCondition.NIGHT)
+    assert slow.motion_kernel_length() > fast.motion_kernel_length()
+    kernel = fast.motion_kernel()
+    assert kernel.shape[0] == kernel.shape[1]
+    assert kernel.shape[0] % 2 == 1
+
+
+def test_motion_deblurrer_uses_daytime_model() -> None:
+    reference = np.zeros((32, 32, 3), dtype=np.uint8)
+    cv2.rectangle(reference, (4, 4), (28, 28), (255, 255, 255), 3)
+    model = fit_daytime_detail_model([reference])
+    profile = CaptureProfile(
+        fps=30.0,
+        lighting=LightingCondition.DAYTIME,
+        has_daytime_reference=True,
+    )
+    processor = MotionAwareDeblurrer(profile, model)
+    blurred = cv2.GaussianBlur(reference, (0, 0), 2.5)
+    restored = processor.process(blurred)
+    blurred_gradient, _ = analyze_frame(blurred)
+    restored_gradient, _ = analyze_frame(restored)
+    assert restored_gradient >= blurred_gradient
+
+
 def test_daytime_detail_model_roundtrip(tmp_path) -> None:
     frame = np.zeros((32, 32, 3), dtype=np.uint8)
     cv2.rectangle(frame, (4, 4), (28, 28), (255, 255, 255), 2)
